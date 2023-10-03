@@ -1,11 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
 use eframe::{
-    egui::{self, RichText, Widget},
+    egui::{self, RichText},
     epaint::Color32,
 };
-use midly;
-use std::{fmt::*, fs, io, result::Result};
+use midly::{self, num::u7};
+use std::{collections::HashMap, fmt::*, fs, result::Result};
 use thiserror::*;
 
 // TODO: Add custom icon
@@ -25,10 +25,76 @@ fn main() -> Result<(), eframe::Error> {
     )
 }
 
-#[derive(Default)]
 struct MyApp {
     picked_midi_path: Option<String>,
-    midi_text: Option<String>,
+    midi_key_pairs: Vec<Option<MidiKeyPair>>,
+    key_to_keyboard_mapping: HashMap<u8, String>,
+}
+
+type PlanckRows = Vec<Vec<String>>;
+const MIDI_C_KEY: u8 = 60;
+
+struct MidiKeyPair {
+    midi_key: u7,
+    keyboard_key: String,
+}
+
+fn default_planck_rows() -> PlanckRows {
+    [
+        [
+            "TAB", "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "BCK",
+        ],
+        ["ESC", "A", "S", "D", "F", "G", "H", "J", "K", "L", ";", "'"],
+        [
+            "SHF", "Z", "X", "C", "V", "B", "N", "M", ",", ".", "/", "ETR",
+        ],
+        [
+            "", "CTRL", "ALT", "ORYX", "OS", "SHFDOWN", "SPACE", "SHFUP", "<-", "\\/", "/\\", "->",
+        ],
+    ]
+    .map(|row| row.map(|key| key.to_owned()).into_iter().collect())
+    .into_iter()
+    .collect()
+}
+
+fn chromatic_planck_mapping(base_key: &str, rows: PlanckRows) -> HashMap<u8, String> {
+    let mut base_index = 0;
+    let mut found_base_key = false;
+    'outer: for row in rows.iter() {
+        for key in row {
+            if key == base_key {
+                found_base_key = true;
+                break 'outer;
+            }
+            base_index += 1;
+        }
+    }
+    if !found_base_key {
+        panic!("Expected base key to exist")
+    }
+
+    let mut key_to_keyboard_mapping = HashMap::new();
+    let mut index = 0;
+    for row in rows.iter() {
+        for keyboard_key in row {
+            let key = MIDI_C_KEY + (index - base_index);
+            key_to_keyboard_mapping
+                .insert(key, keyboard_key.clone())
+                .expect("Expect insert to work");
+            index += 1;
+        }
+    }
+    key_to_keyboard_mapping
+}
+
+impl Default for MyApp {
+    fn default() -> Self {
+        MyApp {
+            picked_midi_path: None,
+            midi_key_pairs: Vec::new(),
+            key_to_keyboard_mapping: chromatic_planck_mapping("ESC", default_planck_rows()),
+        }
+    }
 }
 
 impl MyApp {
@@ -81,26 +147,63 @@ impl MyApp {
         });
     }
 
+    // C  -> key = 60 + 0
+    // C# -> key = 60 + 1
+    // D  -> key = 60 + 2
+    // D# -> key = 60 + 3
+    // E  -> key = 60 + 4
+    // F  -> key = 60 + 5
+    // F# -> key = 60 + 6
+    // G  -> key = 60 + 7
+    // G# -> key = 60 + 8
+    // A  -> key = 60 + 9
+    // A# -> key = 60 + 10
+    // B  -> key = 60 + 11
+
     fn load_midi_file(&mut self, path: String) -> Result<(), LoadMidiFileError> {
         self.picked_midi_path = Some(path.clone());
-        let midi_text = String::new();
         let file = fs::read(path)?;
         let parsed_midi = midly::Smf::parse(&file)?;
         let first_track = parsed_midi
             .tracks
             .first()
             .ok_or(LoadMidiFileError::NoTrackError)?;
+
+        self.midi_key_pairs.clear();
         for note in first_track {
-            match note.kind {
-                midly::TrackEventKind::Midi { channel, message } => match message {
-                    midly::MidiMessage::NoteOn { key, vel } => {} // TODO: Finish this
-                },
-                _ => {}
+            if let midly::TrackEventKind::Midi {
+                channel: _,
+                message,
+            } = note.kind
+            {
+                if let midly::MidiMessage::NoteOn { key, vel: _ } = message {
+                    let pair =
+                        self.key_to_keyboard_mapping
+                            .get(&key.into())
+                            .and_then(|keyboard_key| {
+                                Some(MidiKeyPair {
+                                    midi_key: key,
+                                    keyboard_key: keyboard_key.clone(),
+                                })
+                            });
+                    self.midi_key_pairs.push(pair);
+                }
             }
         }
-        self.midi_text = Some(midi_text);
 
         Ok(())
+    }
+
+    fn get_midi_keys_text(&self) -> String {
+        let mut midi_keys_text = String::new();
+        for opt_pair in self.midi_key_pairs.iter() {
+            let pair_text = match opt_pair {
+                Some(pair) => format!("{}  ({})", pair.keyboard_key, pair.midi_key),
+                None => "ERROR".to_owned(),
+            };
+            midi_keys_text += &pair_text;
+        }
+        midi_keys_text
     }
 }
 
@@ -154,11 +257,11 @@ impl eframe::App for MyApp {
                         });
                     }
 
-                    if let Some(midi_text) = &self.midi_text {
+                    if self.midi_key_pairs.len() > 0 {
                         ui.add_space(16.0);
                         ui.horizontal_wrapped(|ui| {
                             ui.label("Notes:");
-                            ui.monospace(midi_text);
+                            ui.monospace(self.get_midi_keys_text());
                         });
                     }
                 });
