@@ -58,7 +58,7 @@ fn default_planck_rows() -> PlanckRows {
 }
 
 fn chromatic_planck_mapping(base_key: &str, rows: PlanckRows) -> HashMap<u8, String> {
-    let mut base_index = 0;
+    let mut base_index: i32 = 0;
     let mut found_base_key = false;
     'outer: for row in rows.iter() {
         for key in row {
@@ -74,13 +74,13 @@ fn chromatic_planck_mapping(base_key: &str, rows: PlanckRows) -> HashMap<u8, Str
     }
 
     let mut key_to_keyboard_mapping = HashMap::new();
-    let mut index = 0;
+    let mut index: i32 = 0;
     for row in rows.iter() {
         for keyboard_key in row {
-            let key = MIDI_C_KEY + (index - base_index);
-            key_to_keyboard_mapping
-                .insert(key, keyboard_key.clone())
-                .expect("Expect insert to work");
+            let midi_key_i32 = MIDI_C_KEY as i32 + (index - base_index);
+            if let Ok(key_u8) = midi_key_i32.try_into() {
+                key_to_keyboard_mapping.insert(key_u8, keyboard_key.clone());
+            }
             index += 1;
         }
     }
@@ -141,7 +141,7 @@ impl MyApp {
                     .filter(|x| x.ends_with(".mid") || x.ends_with(".midi"))
                     .nth(0)
                 {
-                    self.load_midi_file(path);
+                    let _ = self.load_midi_file(path);
                 }
             }
         });
@@ -198,8 +198,8 @@ impl MyApp {
         let mut midi_keys_text = String::new();
         for opt_pair in self.midi_key_pairs.iter() {
             let pair_text = match opt_pair {
-                Some(pair) => format!("{}  ({})", pair.keyboard_key, pair.midi_key),
-                None => "ERROR".to_owned(),
+                Some(pair) => format!("\n{}  ({})", pair.keyboard_key, pair.midi_key),
+                None => "\nERROR".to_owned(),
             };
             midi_keys_text += &pair_text;
         }
@@ -245,7 +245,7 @@ impl eframe::App for MyApp {
                             .add_filter("midi", &["mid", "midi"])
                             .pick_file()
                         {
-                            self.load_midi_file(path.display().to_string());
+                            let _ = self.load_midi_file(path.display().to_string());
                         }
                     }
 
@@ -259,9 +259,11 @@ impl eframe::App for MyApp {
 
                     if self.midi_key_pairs.len() > 0 {
                         ui.add_space(16.0);
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label("Notes:");
-                            ui.monospace(self.get_midi_keys_text());
+                        egui::ScrollArea::new([false, true]).show(ui, |ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label("Notes:");
+                                ui.monospace(self.get_midi_keys_text());
+                            });
                         });
                     }
                 });
