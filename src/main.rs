@@ -57,13 +57,19 @@ impl MidiKeyTrack {
                 Some(key) => key,
                 None => "NONE".to_owned(),
             };
-            midi_keys_text += &format!("\n{}  ({})", pair.midi_key, keyboard_key);
+            let pair_text = &format!("{:<4}  ({:<4}) ", pair.midi_key, keyboard_key);
+            if pair.delta == 0 {
+                midi_keys_text += pair_text;
+            } else {
+                midi_keys_text += &format!("\n{}", pair_text);
+            }
         }
         midi_keys_text
     }
 }
 
 struct MidiKeyPair {
+    delta: u32,
     midi_key: u7,
     keyboard_key: Option<String>,
 }
@@ -350,6 +356,7 @@ impl MyApp {
 
         self.midi_key_tracks.clear();
         let mut channel_num: u32 = 1;
+        println!("found tracks: {}", parsed_midi.tracks.len());
         for track in parsed_midi.tracks {
             let mut midi_key_track = MidiKeyTrack::new();
             midi_key_track.name = format!("Channel {}", channel_num);
@@ -366,6 +373,7 @@ impl MyApp {
                                 .get(&key.into())
                                 .and_then(|key| Some(key.to_string()));
                             let pair = MidiKeyPair {
+                                delta: note.delta.as_int(),
                                 midi_key: key,
                                 keyboard_key: keyboard_key.clone(),
                             };
@@ -442,15 +450,21 @@ impl eframe::App for MyApp {
 
                     if self.midi_key_tracks.len() > 0 {
                         ui.add_space(16.0);
-                        egui::ScrollArea::new([false, true])
+                        ui.label(format!("Tracks ({})", self.midi_key_tracks.len()));
+                        egui::ScrollArea::new([true, true])
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
-                                for track in self.midi_key_tracks.iter() {
-                                    ui.horizontal_wrapped(|ui| {
-                                        ui.label(format!("{}:", track.name));
-                                        ui.monospace(track.get_midi_keys_text());
-                                    });
-                                }
+                                ui.set_min_width(200.0 * self.midi_key_tracks.len() as f32);
+                                ui.columns(self.midi_key_tracks.len(), |columns| {
+                                    let mut i = 0;
+                                    for track in self.midi_key_tracks.iter() {
+                                        columns[i].horizontal_wrapped(|ui| {
+                                            ui.label(format!("{}:", track.name));
+                                            ui.monospace(track.get_midi_keys_text());
+                                        });
+                                        i += 1;
+                                    }
+                                });
                             });
                     }
                 });
